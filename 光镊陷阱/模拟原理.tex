@@ -1,0 +1,351 @@
+% 建议用临时目录编译本文件，再只复制 PDF 回项目目录，避免留下 .aux/.log 等中间文件。
+\documentclass[UTF8,a4paper,12pt,fontset=fandol]{ctexart}
+\nofiles
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+
+\geometry{margin=2.35cm}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.35em}
+
+\newcommand{\kb}{k_{\mathrm B}}
+\newcommand{\dd}{\mathrm d}
+\newcommand{\E}{\mathbb E}
+\newcommand{\Var}{\operatorname{Var}}
+
+\title{三维布朗粒子光镊势阱模拟原理}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{模拟对象}
+
+网页模拟的是一个处在三维谐振势阱中的过阻尼布朗粒子。粒子位置记为
+\[
+  \mathbf r(t)=(x(t),y(t),z(t)).
+\]
+程序内部只保存离散时间序列
+\[
+  t_n=n\Delta t,\qquad
+  \mathbf r_n=(x_n,y_n,z_n),
+\]
+其中 $\Delta t$ 来自界面中的 \texttt{dt}，总步数为
+\[
+  N=\operatorname{round}(T_{\mathrm{total}}/\Delta t).
+\]
+所有图表都由这一条离散轨迹，或由同一组输入参数派生的一步采样统计量得到。
+
+\section{力、热噪声与无墙扩散}
+
+三维谐振势阱在第 $i$ 个方向给出的回复力为
+\[
+  F_{\mathrm{trap},i}(r_i)=-\kappa_i r_i,
+\]
+其中 $i\in\{x,y,z\}$。如果网页中打开“恒定力”，程序还会加入外力 $F_i$，因此总确定性力写成
+\[
+  f_i(r_i)=-\kappa_i r_i+F_i.
+\]
+没有硬墙时，对应方向的平衡中心为
+\[
+  \mu_i=\frac{F_i}{\kappa_i}.
+\]
+
+程序使用的玻尔兹曼常数单位是
+\[
+  \kb=13.80649\ \mathrm{fN\,nm/K},
+\]
+所以热能为 $\kb T$。若界面中的粒子半径 $a$ 以 $\mu\mathrm m$ 为单位，黏滞系数 $\eta$ 以 $\mathrm{Pa\,s}$ 为单位，则远离墙面的 Stokes 阻尼在程序单位中写作
+\[
+  \gamma_0=6\pi\eta a\times 1000,
+\]
+单位为 $\mathrm{fN\,ms/nm}$。无墙扩散系数由 Einstein 关系给出：
+\[
+  D_0=\frac{\kb T}{\gamma_0},
+\]
+单位为 $\mathrm{nm^2/ms}$。
+
+\section{硬墙水动力修正}
+
+硬墙开启时，程序令墙面为
+\[
+  z=z_w.
+\]
+粒子中心到墙面的几何量写作
+\[
+  h_{\mathrm{raw}}=z-z_w+a_{\mathrm{nm}},
+  \qquad a_{\mathrm{nm}}=1000a,
+\]
+并在数值上取下限
+\[
+  h=\max\!\left(h_{\mathrm{raw}},
+  \frac{9}{8}(1+10^{-6})a_{\mathrm{nm}},
+  10^{-9}\right).
+\]
+局部平行墙面方向和垂直墙面方向的扩散修正因子为
+\[
+  m_{\parallel}=\max\!\left(10^{-6},\,1-\frac{9a_{\mathrm{nm}}}{16h}\right),
+  \qquad
+  m_{\perp}=\max\!\left(10^{-6},\,1-\frac{9a_{\mathrm{nm}}}{8h}\right).
+\]
+于是
+\[
+  D_{\parallel}(z)=D_0m_{\parallel},
+  \qquad
+  D_{\perp}(z)=D_0m_{\perp},
+\]
+并且局部阻尼仍通过 Einstein 关系得到：
+\[
+  \gamma_{\parallel}(z)=\frac{\kb T}{D_{\parallel}(z)},
+  \qquad
+  \gamma_{\perp}(z)=\frac{\kb T}{D_{\perp}(z)}.
+\]
+程序还使用
+\[
+  \frac{\partial D_{\perp}}{\partial z}
+  =D_0\frac{9a_{\mathrm{nm}}}{8h^2}
+\]
+作为 z 方向空间变扩散带来的漂移修正。界面中的 $\alpha$ 控制随机积分约定；这项以 $(1-\alpha)\partial D_{\perp}/\partial z$ 的形式进入 z 更新式。
+
+\section{一步 Langevin 更新}
+
+每个时间步，程序先在当前位置 $z_n$ 计算 $D_{\parallel}$、$D_{\perp}$、$\gamma_{\parallel}$、$\gamma_{\perp}$。令 $\xi_x,\xi_y,\xi_z$ 为相互独立的标准正态随机数，则 x 和 y 的更新为
+\[
+  x_{n+1}
+  =x_n+
+  \frac{-\kappa_xx_n+F_x}{\gamma_{\parallel}(z_n)}\Delta t
+  +\sqrt{2D_{\parallel}(z_n)\Delta t}\,\xi_x,
+\]
+\[
+  y_{n+1}
+  =y_n+
+  \frac{-\kappa_yy_n+F_y}{\gamma_{\parallel}(z_n)}\Delta t
+  +\sqrt{2D_{\parallel}(z_n)\Delta t}\,\xi_y.
+\]
+z 方向先得到候选值
+\[
+  z^\ast
+  =z_n+
+  \left[
+  \frac{-\kappa_zz_n+F_z}{\gamma_{\perp}(z_n)}
+  +(1-\alpha)\frac{\partial D_{\perp}}{\partial z}(z_n)
+  \right]\Delta t
+  +\sqrt{2D_{\perp}(z_n)\Delta t}\,\xi_z.
+\]
+若硬墙关闭，则 $z_{n+1}=z^\ast$。若硬墙开启并且 $z^\ast<z_w$，程序采用镜面反射：
+\[
+  z_{n+1}=z_w+(z_w-z^\ast).
+\]
+否则 $z_{n+1}=z^\ast$。
+
+当硬墙关闭时，
+\[
+  D_{\parallel}=D_{\perp}=D_0,\qquad
+  \gamma_{\parallel}=\gamma_{\perp}=\gamma_0,
+\]
+上面的离散过程退化为三维 Ornstein--Uhlenbeck 过程。
+
+\section{基础统计量}
+
+模拟完成后，程序对完整轨迹计算每个方向的均值、方差、标准差、最小值和最大值。对第 $i$ 个方向，
+\[
+  \bar r_i=\frac{1}{N+1}\sum_{n=0}^{N} r_{i,n},
+  \qquad
+  s_i^2=\frac{1}{N+1}\sum_{n=0}^{N}(r_{i,n}-\bar r_i)^2.
+\]
+这里的方差使用 $1/(N+1)$，不是无偏估计的 $1/N$ 修正。
+
+无硬墙或不考虑 z 截断时，谐振势阱的理论标准差为
+\[
+  \sigma_i=\sqrt{\frac{D_0\gamma_0}{\kappa_i}}
+  =\sqrt{\frac{\kb T}{\kappa_i}}.
+\]
+界面摘要中的 ``kappa from var'' 使用方差反推刚度：
+\[
+  \kappa_{i,\mathrm{var}}=\frac{D_0\gamma_0}{s_i^2}
+  =\frac{\kb T}{s_i^2}.
+\]
+硬墙开启时，z 方向被截断，程序不显示 z 方向的这个反推刚度。
+
+\section{位置分布和理论密度}
+
+理论一维密度先从高斯分布开始。第 $i$ 个方向的中心为
+\[
+  \mu_i=\frac{F_i}{\kappa_i},
+\]
+标准差为 $\sigma_i$，因此
+\[
+  p_i(r)=
+  \frac{1}{\sigma_i\sqrt{2\pi}}
+  \exp\!\left[-\frac{(r-\mu_i)^2}{2\sigma_i^2}\right].
+\]
+
+如果硬墙开启并且考虑 z 方向，程序把墙下方的理论密度置零，并对允许区域重新归一化。令
+\[
+  a_w=\frac{z_w-\mu_z}{\sigma_z},\qquad
+  Q=1-\Phi(a_w),
+\]
+其中 $\Phi$ 是标准正态分布函数，则
+\[
+  p_z^{\mathrm{wall}}(z)=
+  \begin{cases}
+  \displaystyle
+  \frac{1}{Q\sigma_z\sqrt{2\pi}}
+  \exp\!\left[-\frac{(z-\mu_z)^2}{2\sigma_z^2}\right],
+  & z\ge z_w,\\[1.2em]
+  0,& z<z_w.
+  \end{cases}
+\]
+对应的截断正态理论均值和方差为
+\[
+  \E[z]=\mu_z+\sigma_z\lambda,\qquad
+  \Var[z]=\sigma_z^2(1+a_w\lambda-\lambda^2),
+\]
+其中
+\[
+  \lambda=\frac{\varphi(a_w)}{Q},
+\]
+$\varphi$ 是标准正态密度。
+
+``位置分布'' 图对当前轴组中的两个坐标分别做一维直方图。若 bin 宽度为 $\Delta r$，总样本数为 $N+1$，则理论曲线在直方图中的高度按
+\[
+  (N+1)\Delta r\,p_i(r)
+\]
+换算成每个 bin 的期望计数。
+
+``实测密度'' 图使用二维网格。对当前平面 $(u,v)$，程序统计每个格子的样本数 $n_{jk}$，再用格子面积归一化：
+\[
+  \hat p(u_j,v_k)=
+  \frac{n_{jk}}{(N+1)\Delta u\Delta v}.
+\]
+为了降低画面噪声，二维密度会再经过一个可分离的五点平滑核
+\[
+  (0.054,\ 0.244,\ 0.403,\ 0.244,\ 0.054).
+\]
+
+``理论密度'' 图不重新采样，而是在网格中心直接计算
+\[
+  p_{uv}^{\mathrm{th}}(u,v)=p_u(u)p_v(v).
+\]
+如果当前平面包含 z 且硬墙开启，z 因子使用上面的截断密度。
+
+\section{漂移 C 和扩散 D 曲线}
+
+``漂移 C'' 和 ``扩散 D'' 不是直接由长轨迹相邻点分箱得到的。为了让曲线更平滑，程序对每个空间 bin 单独做一步 ensemble 采样。
+
+对第 $i$ 个方向和 bin 中心 $r$，程序先构造起点
+\[
+  \mathbf s(r)=(\mu_x,\mu_y,\mu_z),
+\]
+若硬墙开启，则先把 $s_z$ 限制到不小于 $z_w$，然后把第 $i$ 个坐标替换为 $r$。如果硬墙开启且 $i=z$、$r<z_w$，该 bin 会被跳过。
+
+在同一个起点 $\mathbf s(r)$ 上独立发射 $M$ 个单步样本，$M$ 就是界面中的 \texttt{ensemble / bin}。记第 $m$ 个单步位移为
+\[
+  \Delta r_i^{(m)}=r_{i,+}^{(m)}-s_i,
+\]
+则模拟曲线使用
+\[
+  \hat C_i(r)=\frac{1}{M}\sum_{m=1}^{M}
+  \frac{\Delta r_i^{(m)}}{\Delta t},
+\]
+\[
+  \hat D_i(r)=\frac{1}{M}\sum_{m=1}^{M}
+  \frac{\left(\Delta r_i^{(m)}\right)^2}{2\Delta t}.
+\]
+
+对应的理论线取自一步更新式中的局部漂移和局部扩散。令 $\mathbf s=\mathbf s(r)$，则
+\[
+  C_i^{\mathrm{th}}(r)=
+  \frac{-\kappa_i s_i+F_i}{\gamma_i(s_z)}
+  +\delta_{iz}(1-\alpha)
+  \frac{\partial D_{\perp}}{\partial z}(s_z),
+\]
+其中
+\[
+  \gamma_i(s_z)=
+  \begin{cases}
+  \gamma_{\parallel}(s_z),& i=x,y,\\
+  \gamma_{\perp}(s_z),& i=z,
+  \end{cases}
+\]
+而扩散理论线为
+\[
+  D_i^{\mathrm{th}}(r)=
+  \begin{cases}
+  D_{\parallel}(s_z),& i=x,y,\\
+  D_{\perp}(s_z),& i=z.
+  \end{cases}
+\]
+靠近墙面时，模拟点还会受到镜面反射影响；理论线显示的是局部 Langevin 更新中写入的漂移和扩散。
+
+\section{ACF 理论线}
+
+ACF 图画的是位置自相关函数。程序先使用模拟轨迹的均值 $\bar r_i$ 和方差 $s_i^2$，然后对滞后时间 $\tau=\ell\Delta t$ 计算
+\[
+  \widehat{\mathrm{ACF}}_i(\tau)
+  =
+  \frac{
+  \left\langle
+  (r_i(t)-\bar r_i)(r_i(t+\tau)-\bar r_i)
+  \right\rangle_t
+  }{s_i^2}.
+\]
+为了让浏览器绘图更快，程序只选取一组线性加对数分布的滞后点，并在可配对样本太多时抽步长求平均。
+
+图中虚线理论参考使用无墙 Ornstein--Uhlenbeck 形式：
+\[
+  \mathrm{ACF}_i^{\mathrm{th}}(\tau)
+  =
+  \exp\!\left(-\frac{\kappa_i}{\gamma_0}\tau\right).
+\]
+如果硬墙开启，或者局部扩散随 z 明显变化，实测 ACF 可以偏离这条无墙参考线。
+
+\section{MSD 理论线}
+
+MSD 图画的是平均平方位移：
+\[
+  \widehat{\mathrm{MSD}}_i(\tau)
+  =
+  \left\langle
+  \left[r_i(t+\tau)-r_i(t)\right]^2
+  \right\rangle_t.
+\]
+程序同样只选取一组滞后点，并在样本很多时抽样平均。
+
+虚线理论参考仍使用无墙 Ornstein--Uhlenbeck 结果：
+\[
+  \mathrm{MSD}_i^{\mathrm{th}}(\tau)
+  =
+  2\sigma_i^2
+  \left[
+  1-\exp\!\left(-\frac{\kappa_i}{\gamma_0}\tau\right)
+  \right].
+\]
+当 $\tau$ 很大时，
+\[
+  \mathrm{MSD}_i^{\mathrm{th}}(\infty)=2\sigma_i^2.
+\]
+
+\section{各图表与公式的对应关系}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+网页标签 & 模拟统计量 & 理论线或理论图 \\
+\midrule
+3D轨迹 & $x_n,y_n,z_n$ & $\sigma_i=\sqrt{\kb T/\kappa_i}$ 给出参考椭圆 \\
+位置分布 & 一维直方图计数 & 高斯或硬墙截断高斯 \\
+实测密度 & 二维归一化直方图 & 无 \\
+理论密度 & 无重新采样 & $p_u(u)p_v(v)$ \\
+漂移 C & $\langle\Delta r_i\rangle/\Delta t$ & 局部确定性漂移 \\
+扩散 D & $\langle(\Delta r_i)^2\rangle/(2\Delta t)$ & 局部扩散 $D_{\parallel}$ 或 $D_{\perp}$ \\
+ACF & 归一化位置自相关 & $\exp[-(\kappa_i/\gamma_0)\tau]$ \\
+MSD & 平均平方位移 & $2\sigma_i^2[1-\exp(-\kappa_i\tau/\gamma_0)]$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}
